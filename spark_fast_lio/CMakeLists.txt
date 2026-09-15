@@ -81,8 +81,8 @@ add_library(ikd_tree third_party/ikd-Tree/ikd_Tree.cpp)
 # To resolve "recompile with -fPIC" issue
 set_target_properties(ikd_tree PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
-# Optional: Livox driver
-find_package(livox_ros_driver QUIET)
+# Optional: Livox driver (ROS2 driver2 — provides livox_ros_driver2::msg::CustomMsg)
+find_package(livox_ros_driver2 QUIET)
 
 # Create the library as a component
 add_library(spark_lio_component SHARED
@@ -99,19 +99,14 @@ target_link_libraries(spark_lio_component
   ikd_tree
 )
 
-# If Livox found, link it here
-if(livox_ros_driver_FOUND)
-  target_link_libraries(spark_lio_component
-    ${livox_ros_driver_LIBRARIES}
-  )
-  target_include_directories(spark_lio_component PRIVATE
-    ${livox_ros_driver_INCLUDE_DIRS}
-  )
+# If Livox found, wire it here (ament handles include dirs + msg typesupport link)
+if(livox_ros_driver2_FOUND)
+  ament_target_dependencies(spark_lio_component livox_ros_driver2)
   target_compile_definitions(spark_lio_component PRIVATE
-    -DLIVOX_ROS_DRIVER_FOUND=${livox_ros_driver_FOUND}
+    LIVOX_ROS_DRIVER_FOUND=1
   )
 else()
-  message(STATUS "Missing livox driver! AVIA Lidar will be disabled!")
+  message(STATUS "Missing livox_ros_driver2! AVIA/Mid-360 Lidar will be disabled!")
 endif()
 
 # Pull in ament dependencies

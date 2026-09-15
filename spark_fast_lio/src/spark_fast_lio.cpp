@@ -88,17 +88,25 @@ SPARKFastLIO2::SPARKFastLIO2(const rclcpp::NodeOptions &options)
   rclcpp::QoS lidar_qos(rclcpp::KeepLast(10));
   lidar_qos.reliable();
   lidar_qos.durability_volatile();
-  sub_lidar_      = create_subscription<sensor_msgs::msg::PointCloud2>(
-      "lidar",
-      lidar_qos,
-      std::bind(&SPARKFastLIO2::standardLiDARCallback, this, std::placeholders::_1));
+  // Subscribe to exactly ONE lidar input matching preprocess.lidar_type (declared once here,
+  // reused below). Livox (AVIA/CustomMsg) and spinning-lidar (PointCloud2) cannot share the
+  // same topic name with different message types.
+  const int lidar_type_param = declare_parameter<int>("preprocess.lidar_type", static_cast<int>(AVIA));
 
 #if defined(LIVOX_ROS_DRIVER_FOUND) && LIVOX_ROS_DRIVER_FOUND
-  sub_lidar_livox_ = create_subscription<livox_ros_driver2::msg::CustomMsg>(
-      "lidar",
-      lidar_qos,
-      std::bind(&SPARKFastLIO2::livoxLidarCallback, this, std::placeholders::_1));
+  if (lidar_type_param == AVIA) {
+    sub_lidar_livox_ = create_subscription<livox_ros_driver2::msg::CustomMsg>(
+        "lidar",
+        lidar_qos,
+        std::bind(&SPARKFastLIO2::livoxLiDARCallback, this, std::placeholders::_1));
+  } else
 #endif
+  {
+    sub_lidar_ = create_subscription<sensor_msgs::msg::PointCloud2>(
+        "lidar",
+        lidar_qos,
+        std::bind(&SPARKFastLIO2::standardLiDARCallback, this, std::placeholders::_1));
+  }
   auto imu_qos = rclcpp::SensorDataQoS();
   sub_imu_ = create_subscription<sensor_msgs::msg::Imu>(
       "imu", imu_qos, std::bind(&SPARKFastLIO2::imuCallback, this, std::placeholders::_1));
@@ -121,8 +129,7 @@ SPARKFastLIO2::SPARKFastLIO2(const rclcpp::NodeOptions &options)
   preprocessor_->blind = declare_parameter<double>("preprocess.blind", 0.01);
   preprocessor_->blind_for_human_pilots =
       declare_parameter<double>("preprocess.blind_for_human_pilots", 1.5);
-  preprocessor_->lidar_type =
-      declare_parameter<int>("preprocess.lidar_type", static_cast<int>(AVIA));
+  preprocessor_->lidar_type = lidar_type_param;  // declared above in the subscription block
   preprocessor_->N_SCANS = declare_parameter<int>("preprocess.scan_line", 16);
   preprocessor_->time_unit =
       declare_parameter<int>("preprocess.timestamp_unit", static_cast<int>(US));
@@ -388,14 +395,14 @@ void SPARKFastLIO2::standardLiDARCallback(const sensor_msgs::msg::PointCloud2 &m
   sig_buffer_.notify_all();
 }
 
-#if defined(LIVOXROS_DRIVER_FOUND) && LIVOX_ROS_DRIVER_FOUND
+#if defined(LIVOX_ROS_DRIVER_FOUND) && LIVOX_ROS_DRIVER_FOUND
 void SPARKFastLIO2::livoxLiDARCallback(
     const livox_ros_driver2::msg::CustomMsg::ConstSharedPtr msg) {
   static bool timediff_set_flg = false;
 
   std::lock_guard<std::mutex> lk(buffer_mutex_);
   scan_count_++;
-  rclcpp::Time msg_time = msg.header.stamp;
+  rclcpp::Time msg_time = msg->header.stamp;
 
   if (msg_time < last_lidar_timestamp_) {
     RCLCPP_ERROR(get_logger(), "Livox loopback, clearing buffers");
@@ -411,9 +418,9 @@ void SPARKFastLIO2::livoxLiDARCallback(
                            << ", lidar header time: " << last_lidar_timestamp_.nanoseconds());
   }
 
-  if (time_sync_en_ && !timediff_set_flg && diff_s > 1.0 && !imu_buffer.empty()) {
+  if (time_sync_en_ && !timediff_set_flg && diff_s > 1.0 && !imu_buffer_.empty()) {
     timediff_set_flg        = true;
-    timediff_lidar_wrt_imu_ = last_lidar_timestamp_.nanseconds() + static_cast<int64_t>(1.0e8) -
+    timediff_lidar_wrt_imu_ = last_lidar_timestamp_.nanoseconds() + static_cast<int64_t>(1.0e8) -
                               last_imu_timestamp_.nanoseconds();
     RCLCPP_INFO_STREAM(
         this->get_logger(),
@@ -421,7 +428,7 @@ void SPARKFastLIO2::livoxLiDARCallback(
   }
 
   PointCloudXYZI::Ptr ptr(new PointCloudXYZI());
-  preprocessor_->process(msg, ptr);
+  preprocessor_->process(*msg, ptr);
 
   lidar_buffer_.push_back(ptr);
   time_buffer_.push_back(msg_time.seconds());

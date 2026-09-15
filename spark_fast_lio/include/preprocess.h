@@ -10,7 +10,7 @@
 #include "rclcpp/time.hpp"
 
 #if defined(LIVOX_ROS_DRIVER_FOUND) && LIVOX_ROS_DRIVER_FOUND
-#include <livox_ros_driver/CustomMsg.h>
+#include <livox_ros_driver2/msg/custom_msg.hpp>
 #endif
 
 #define IS_VALID(a) ((abs(a) > 1e8) ? true : false)
@@ -88,7 +88,7 @@ class Preprocess {
   ~Preprocess();
 
 #if defined(LIVOX_ROS_DRIVER_FOUND) && LIVOX_ROS_DRIVER_FOUND
-  void process(const livox_ros_driver::CustomMsg &msg, PointCloudXYZI::Ptr &pcl_out);
+  void process(const livox_ros_driver2::msg::CustomMsg &msg, PointCloudXYZI::Ptr &pcl_out);
 #endif
   void process(const sensor_msgs::msg::PointCloud2 &msg, PointCloudXYZI::Ptr &pcl_out);
   void set(bool feat_en, int lid_type, double bld, int pfilt_num);
@@ -105,7 +105,7 @@ class Preprocess {
  private:
   bool is_from_pilot_zone(const float &pt_x, const float &pt_y, const float &pt_z, const std::string mode = "velodyne");
 #if defined(LIVOX_ROS_DRIVER_FOUND) && LIVOX_ROS_DRIVER_FOUND
-  void avia_handler(const livox_ros_driver::CustomMsg::ConstPtr &msg);
+  void avia_handler(const livox_ros_driver2::msg::CustomMsg &msg);
 #endif
   void oust64_handler(const sensor_msgs::msg::PointCloud2 &msg);
   void kmoust64_handler(const sensor_msgs::msg::PointCloud2 &msg);

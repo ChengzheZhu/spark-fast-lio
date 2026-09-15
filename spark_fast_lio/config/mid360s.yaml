@@ -1,0 +1,51 @@
+/**:
+  ros__parameters:
+    common:
+      # Livox driver publishes both /livox/lidar and /livox/imu with header.frame_id = "livox_frame"
+      lidar_frame: "livox_frame"
+      imu_frame: "livox_frame"
+      map_frame: "odom"
+      base_frame: "livox_frame"
+      visualization_frame: "livox_frame"
+      time_sync_en: false          # lidar + IMU come from the same device clock; no soft-sync needed
+
+    preprocess:
+      lidar_type: 1                # 1 = Livox (CustomMsg path); Mid-360S CustomMsg == Avia structurally
+      scan_line: 4                 # Mid-360 has 4 laser lines (Avia=6). VERIFY from a bag: max CustomPoint.line
+      blind: 0.3                   # discard returns within 0.3 m (Avia default was 4 m — fatal for close wall)
+      scan_rate: 10                # /livox/lidar frame rate (Hz)
+      timestamp_unit: 3            # unused by the Livox path (avia_handler hardcodes offset_time[ns]->ms)
+
+    point_filter_num_for_preprocessing: 1   # keep every point (precision > speed, offline)
+    point_filter_num: 1
+
+    mapping:
+      acc_cov: 0.1
+      gyr_cov: 0.1
+      b_acc_cov: 0.0001
+      b_gyr_cov: 0.0001
+      fov_degree: 360.0            # Mid-360 is 360 deg horizontal (Avia was 90)
+      det_range: 70.0              # Mid-360 usable range (Avia was 450)
+      extrinsic_est_en: true       # self-refine IMU<->LiDAR extrinsic (initial guess below is approximate)
+      # Approx Livox Mid-360 IMU-in-LiDAR translation; refined online because extrinsic_est_en=true. VERIFY vs datasheet.
+      extrinsic_T: [ -0.011, -0.02329, 0.04412 ]
+      extrinsic_R: [ 1.0, 0.0, 0.0,
+                     0.0, 1.0, 0.0,
+                     0.0, 0.0, 1.0 ]
+
+    filter_size_map: 0.2           # map voxel (m); smaller = finer geometry (Avia used 0.5). Tune 0.1-0.3.
+    cube_side_length: 200.0
+    max_iteration: 4
+
+    gravity_alignment:
+      enable_gravity_alignment: true   # align map z to gravity -> keeps the wall vertical
+
+    publish:
+      path_en: true
+      scan_publish_en: true
+      dense_publish_en: true           # keep full-density scans (quality)
+      scan_bodyframe_pub_en: true
+
+    pcd_save:
+      pcd_save_en: true                # write the accumulated map to PCD
+      interval: -1                     # -1 = all frames into ONE pcd (watch memory on long runs)

@@ -44,7 +44,7 @@ void Preprocess::set(bool feat_en, int lid_type, double bld, int pfilt_num) {
 }
 
 #if defined(LIVOX_ROS_DRIVER_FOUND) && LIVOX_ROS_DRIVER_FOUND
-void Preprocess::process(const livox_ros_driver::CustomMsg &msg, PointCloudXYZI::Ptr &pcl_out) {
+void Preprocess::process(const livox_ros_driver2::msg::CustomMsg &msg, PointCloudXYZI::Ptr &pcl_out) {
   avia_handler(msg);
   *pcl_out = pl_surf;
 }
@@ -112,7 +112,7 @@ bool Preprocess::is_from_pilot_zone(const float &pt_x,
 }
 
 #if defined(LIVOX_ROS_DRIVER_FOUND) && LIVOX_ROS_DRIVER_FOUND
-void Preprocess::avia_handler(const livox_ros_driver::CustomMsg &msg) {
+void Preprocess::avia_handler(const livox_ros_driver2::msg::CustomMsg &msg) {
   pl_surf.clear();
   pl_corn.clear();
   pl_full.clear();
@@ -176,7 +176,7 @@ void Preprocess::avia_handler(const livox_ros_driver::CustomMsg &msg) {
       // pl_surf += pl;
     }
     time += omp_get_wtime() - t0;
-    ROS_DEBUG("Feature extraction time: %lf \n", time / count);
+    RCLCPP_DEBUG(rclcpp::get_logger("Preprocess"), "Feature extraction time: %lf \n", time / count);
   } else {
     for (uint i = 1; i < plsize; i++) {
       if ((msg.points[i].line < N_SCANS) &&
