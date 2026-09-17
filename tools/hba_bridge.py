@@ -93,9 +93,11 @@ class HbaBridge(Node):
 
         p = odom.pose.pose.position
         q = odom.pose.pose.orientation
-        # HBA format: tx ty tz qw qx qy qz
-        self.pose_f.write('%.9f %.9f %.9f %.9f %.9f %.9f %.9f\n'
-                          % (p.x, p.y, p.z, q.w, q.x, q.y, q.z))
+        # HBA format: tx ty tz qw qx qy qz. Newline is a SEPARATOR, not a terminator
+        # (no trailing newline) so HBA's while(!eof) read_pose doesn't dup the last line.
+        prefix = '' if self.idx == 0 else '\n'
+        self.pose_f.write('%s%.9f %.9f %.9f %.9f %.9f %.9f %.9f'
+                          % (prefix, p.x, p.y, p.z, q.w, q.x, q.y, q.z))
         self.pose_f.flush()
 
         if self.idx % 20 == 0:
