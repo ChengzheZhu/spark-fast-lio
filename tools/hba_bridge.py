@@ -56,10 +56,12 @@ class HbaBridge(Node):
         super().__init__('hba_bridge')
         out_dir = self.declare_parameter(
             'out_dir', os.path.expanduser('~/scans/hba/run')).value
+        self.every = max(1, int(self.declare_parameter('every', 1).value))  # keep 1 of every N scans
         self.pcd_dir = os.path.join(out_dir, 'pcd')
         os.makedirs(self.pcd_dir, exist_ok=True)
         self.pose_f = open(os.path.join(out_dir, 'pose.json'), 'w')
-        self.idx = 0
+        self.idx = 0     # index of KEPT frames (pcd/<idx>.pcd + pose line)
+        self.seen = 0    # count of all synced pairs
 
         qos = QoSProfile(depth=200,
                          reliability=ReliabilityPolicy.RELIABLE,
@@ -69,9 +71,14 @@ class HbaBridge(Node):
         self.sync = ApproximateTimeSynchronizer([cloud_sub, odom_sub], queue_size=200, slop=0.02)
         self.sync.registerCallback(self.on_pair)
 
-        self.get_logger().info('hba_bridge -> %s (pcd/ + pose.json). Waiting for scans...' % out_dir)
+        self.get_logger().info('hba_bridge -> %s (pcd/ + pose.json), every=%d. Waiting for scans...'
+                               % (out_dir, self.every))
 
     def on_pair(self, cloud, odom):
+        keep = (self.seen % self.every == 0)
+        self.seen += 1
+        if not keep:
+            return
         arr = point_cloud2.read_points(
             cloud, field_names=('x', 'y', 'z', 'intensity'), skip_nans=True)
         n = arr.shape[0]
