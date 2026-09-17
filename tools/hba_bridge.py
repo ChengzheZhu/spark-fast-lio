@@ -119,15 +119,25 @@ def main():
     node = HbaBridge()
     executor = rclpy.executors.SingleThreadedExecutor()
     executor.add_node(node)
-    spin_thread = threading.Thread(target=executor.spin, daemon=True)
+
+    def _spin():
+        try:
+            executor.spin()
+        except Exception:  # noqa: BLE001  (context torn down on shutdown)
+            pass
+
+    spin_thread = threading.Thread(target=_spin, daemon=True)
     spin_thread.start()
     try:
         input('\n[hba_bridge] play the bag; when it finishes press ENTER to export...\n')
     except (EOFError, KeyboardInterrupt):
         pass
     node.export()
+    executor.shutdown()            # make spin() return cleanly
+    spin_thread.join(timeout=2.0)
     node.destroy_node()
-    rclpy.shutdown()
+    if rclpy.ok():
+        rclpy.shutdown()
 
 
 if __name__ == '__main__':
