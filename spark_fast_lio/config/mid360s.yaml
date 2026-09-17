@@ -49,6 +49,7 @@
       scan_publish_en: true
       dense_publish_en: true           # keep full-density scans (quality)
       scan_bodyframe_pub_en: true
+      scan_lidarframe_pub_en: true    # publish /cloud_registered_lidar (undistorted scan, LiDAR frame) for the HBA bridge
 
     pcd_save:
       pcd_save_en: true                # write the accumulated map to PCD
