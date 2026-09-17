@@ -101,9 +101,13 @@ class Preprocess {
   int             lidar_type, point_filter_num, N_SCANS, SCAN_RATE, time_unit;
   double          blind, blind_for_human_pilots;
   bool            feature_enabled, given_offset_time;
+  bool            rear_blind_en;
+  double          rear_blind_center_deg, rear_blind_width_deg;
 
  private:
   bool is_from_pilot_zone(const float &pt_x, const float &pt_y, const float &pt_z, const std::string mode = "velodyne");
+  // Drop points in a configured rear azimuth sector (operator body). az = atan2(y,x), lidar frame.
+  bool inRearBlind(float x, float y) const;
 #if defined(LIVOX_ROS_DRIVER_FOUND) && LIVOX_ROS_DRIVER_FOUND
   void avia_handler(const livox_ros_driver2::msg::CustomMsg &msg);
 #endif

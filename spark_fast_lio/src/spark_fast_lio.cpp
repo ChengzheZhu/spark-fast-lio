@@ -135,6 +135,12 @@ SPARKFastLIO2::SPARKFastLIO2(const rclcpp::NodeOptions &options)
       declare_parameter<int>("preprocess.timestamp_unit", static_cast<int>(US));
   preprocessor_->SCAN_RATE        = declare_parameter<int>("preprocess.scan_rate", 10);
   preprocessor_->point_filter_num = declare_parameter<int>("point_filter_num_for_preprocessing", 1);
+  preprocessor_->rear_blind_en =
+      declare_parameter<bool>("preprocess.rear_blind_en", false);
+  preprocessor_->rear_blind_center_deg =
+      declare_parameter<double>("preprocess.rear_blind_center_deg", 180.0);
+  preprocessor_->rear_blind_width_deg =
+      declare_parameter<double>("preprocess.rear_blind_width_deg", 90.0);
 
   imu_processor_ = std::make_shared<ImuProcess>();
   if (extrinT_.size() == 3 && extrinR_.size() == 9) {

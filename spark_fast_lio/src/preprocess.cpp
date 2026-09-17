@@ -28,6 +28,10 @@ Preprocess::Preprocess()
   smallp_ratio      = 1.2;
   given_offset_time = false;
 
+  rear_blind_en         = false;
+  rear_blind_center_deg = 180.0;
+  rear_blind_width_deg  = 90.0;
+
   jump_up_limit    = std::cos(jump_up_limit / 180 * M_PI);
   jump_down_limit  = std::cos(jump_down_limit / 180 * M_PI);
   cos160           = std::cos(cos160 / 180 * M_PI);
@@ -41,6 +45,15 @@ void Preprocess::set(bool feat_en, int lid_type, double bld, int pfilt_num) {
   lidar_type       = lid_type;
   blind            = bld;
   point_filter_num = pfilt_num;
+}
+
+bool Preprocess::inRearBlind(float x, float y) const {
+  if (!rear_blind_en) return false;
+  double az = std::atan2(static_cast<double>(y), static_cast<double>(x)) * 180.0 / M_PI;  // -180..180
+  double d  = az - rear_blind_center_deg;
+  while (d > 180.0) d -= 360.0;
+  while (d < -180.0) d += 360.0;
+  return std::fabs(d) <= rear_blind_width_deg * 0.5;
 }
 
 #if defined(LIVOX_ROS_DRIVER_FOUND) && LIVOX_ROS_DRIVER_FOUND
@@ -135,7 +148,8 @@ void Preprocess::avia_handler(const livox_ros_driver2::msg::CustomMsg &msg) {
   if (feature_enabled) {
     for (uint i = 1; i < plsize; i++) {
       if ((msg.points[i].line < N_SCANS) &&
-          ((msg.points[i].tag & 0x30) == 0x10 || (msg.points[i].tag & 0x30) == 0x00)) {
+          ((msg.points[i].tag & 0x30) == 0x10 || (msg.points[i].tag & 0x30) == 0x00) &&
+          !inRearBlind(msg.points[i].x, msg.points[i].y)) {
         pl_full[i].x         = msg.points[i].x;
         pl_full[i].y         = msg.points[i].y;
         pl_full[i].z         = msg.points[i].z;
@@ -180,7 +194,8 @@ void Preprocess::avia_handler(const livox_ros_driver2::msg::CustomMsg &msg) {
   } else {
     for (uint i = 1; i < plsize; i++) {
       if ((msg.points[i].line < N_SCANS) &&
-          ((msg.points[i].tag & 0x30) == 0x10 || (msg.points[i].tag & 0x30) == 0x00)) {
+          ((msg.points[i].tag & 0x30) == 0x10 || (msg.points[i].tag & 0x30) == 0x00) &&
+          !inRearBlind(msg.points[i].x, msg.points[i].y)) {
         valid_num++;
         if (valid_num % point_filter_num == 0) {
           pl_full[i].x         = msg.points[i].x;

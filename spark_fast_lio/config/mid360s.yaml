@@ -6,7 +6,7 @@
       imu_frame: "livox_frame"
       map_frame: "odom"
       base_frame: "livox_frame"
-      visualization_frame: "livox_frame"
+      visualization_frame: "lidar"   # keyword: one of lidar|base|imu (NOT a tf frame_id)
       time_sync_en: false          # lidar + IMU come from the same device clock; no soft-sync needed
 
     preprocess:
@@ -15,6 +15,10 @@
       blind: 0.3                   # discard returns within 0.3 m (Avia default was 4 m — fatal for close wall)
       scan_rate: 10                # /livox/lidar frame rate (Hz)
       timestamp_unit: 3            # unused by the Livox path (avia_handler hardcodes offset_time[ns]->ms)
+      # Rear-FOV crop: drop points inside a rear azimuth sector (operator body). az = atan2(y,x), lidar frame.
+      rear_blind_en: true          # first-guess crop ON; tune center/width against a real cloud
+      rear_blind_center_deg: 180.0 # center of blocked sector (deg, -180..180)
+      rear_blind_width_deg: 90.0   # full angular width of blocked sector (deg)
 
     point_filter_num_for_preprocessing: 1   # keep every point (precision > speed, offline)
     point_filter_num: 1
@@ -38,7 +42,7 @@
     max_iteration: 4
 
     gravity_alignment:
-      enable_gravity_alignment: true   # align map z to gravity -> keeps the wall vertical
+      enable_gravity_alignment: false  # OFF: spark's align drops pre-alignment frames + snaps the map on completion (buggy). Level in post (CloudCompare) instead.
 
     publish:
       path_en: true
