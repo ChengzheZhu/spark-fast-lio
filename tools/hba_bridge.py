@@ -1,28 +1,29 @@
 #!/usr/bin/env python3
 """Bridge spark-fast-lio output -> HBA (hku-mars/HBA) input format.
 
-While a recorded bag is replayed through spark-fast-lio (config `visualization_frame: lidar`,
-`publish.scan_lidarframe_pub_en: true`), this node pairs each per-scan cloud with its pose and
-writes the HBA layout:
+Interactive: run spark-fast-lio (+RViz) and `ros2 bag play` at normal (real-time) pace so spark
+fully processes each scan; this node BUFFERS every processed scan + pose in memory. When the bag
+finishes, press ENTER here to EXPORT the HBA layout:
 
     <out_dir>/
-      pcd/0.pcd, 1.pcd, ...     # each = one undistorted scan in the LiDAR frame (PointXYZI)
-      pose.json                 # one line per scan, "tx ty tz qw qx qy qz" (T_world_lidar)
+      pcd/0.pcd, 1.pcd, ...    # spark's IMU-deskewed per-scan cloud in the LiDAR frame (PointXYZI)
+      pose.json                # one line per scan, "tx ty tz qw qx qy qz" (T_world_lidar)
+      pose_initial.json        # backup (HBA's write_pose overwrites pose.json)
 
-Inputs (same header.stamp, paired via ApproximateTimeSynchronizer):
-  /cloud_registered_lidar (sensor_msgs/PointCloud2) = spark's undistorted scan in the LiDAR frame
-  /odometry               (nav_msgs/Odometry)       = T_world_lidar (because viz_frame=lidar)
+Inputs (paired by header.stamp, ApproximateTimeSynchronizer):
+  /cloud_registered_lidar (sensor_msgs/PointCloud2) = spark cloud_undistort_ (deskewed, LiDAR frame)
+  /odometry               (nav_msgs/Odometry)       = T_world_lidar (viz_frame=lidar)
 
-Run (with ROS + ws_livox + spark installs sourced):
-  python3 hba_bridge.py --ros-args -p out_dir:=$HOME/scans/hba/<seq>
-then in other terminals launch spark and `ros2 bag play <bag>`. Ctrl-C when playback ends.
+Run (ROS + ws_livox + spark installs sourced):
+  python3 hba_bridge.py --ros-args -p out_dir:=$HOME/scans/hba/<seq> [-p every:=1]
 """
 import os
+import shutil
+import threading
 
 import numpy as np
 import rclpy
 from rclpy.node import Node
-from rclpy.executors import ExternalShutdownException
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
 from message_filters import Subscriber, ApproximateTimeSynchronizer
 from sensor_msgs.msg import PointCloud2
@@ -45,7 +46,6 @@ _PCD_HEADER = (
 
 
 def write_pcd_xyzi(path, xyzi):
-    """xyzi: (N,4) float32 array -> binary_little_endian PCD."""
     with open(path, 'wb') as f:
         f.write(_PCD_HEADER.format(n=xyzi.shape[0]).encode('ascii'))
         f.write(np.ascontiguousarray(xyzi, dtype='<f4').tobytes())
@@ -54,29 +54,28 @@ def write_pcd_xyzi(path, xyzi):
 class HbaBridge(Node):
     def __init__(self):
         super().__init__('hba_bridge')
-        out_dir = self.declare_parameter(
+        self.out_dir = self.declare_parameter(
             'out_dir', os.path.expanduser('~/scans/hba/run')).value
-        self.every = max(1, int(self.declare_parameter('every', 1).value))  # keep 1 of every N scans
-        self.pcd_dir = os.path.join(out_dir, 'pcd')
-        os.makedirs(self.pcd_dir, exist_ok=True)
-        self.pose_f = open(os.path.join(out_dir, 'pose.json'), 'w')
-        self.idx = 0     # index of KEPT frames (pcd/<idx>.pcd + pose line)
-        self.seen = 0    # count of all synced pairs
+        self.every = max(1, int(self.declare_parameter('every', 1).value))
+        self._lock = threading.Lock()
+        self._frames = []   # (xyzi ndarray, (tx,ty,tz,qw,qx,qy,qz)) per kept scan
+        self._seen = 0
 
-        qos = QoSProfile(depth=200,
+        qos = QoSProfile(depth=400,
                          reliability=ReliabilityPolicy.RELIABLE,
                          history=HistoryPolicy.KEEP_LAST)
         cloud_sub = Subscriber(self, PointCloud2, '/cloud_registered_lidar', qos_profile=qos)
         odom_sub = Subscriber(self, Odometry, '/odometry', qos_profile=qos)
-        self.sync = ApproximateTimeSynchronizer([cloud_sub, odom_sub], queue_size=200, slop=0.02)
+        self.sync = ApproximateTimeSynchronizer([cloud_sub, odom_sub], queue_size=400, slop=0.02)
         self.sync.registerCallback(self.on_pair)
 
-        self.get_logger().info('hba_bridge -> %s (pcd/ + pose.json), every=%d. Waiting for scans...'
-                               % (out_dir, self.every))
+        self.get_logger().info(
+            'hba_bridge BUFFERING /cloud_registered_lidar + /odometry (every=%d). '
+            'Play the bag, then press ENTER to export -> %s' % (self.every, self.out_dir))
 
     def on_pair(self, cloud, odom):
-        keep = (self.seen % self.every == 0)
-        self.seen += 1
+        keep = (self._seen % self.every == 0)
+        self._seen += 1
         if not keep:
             return
         arr = point_cloud2.read_points(
@@ -85,47 +84,50 @@ class HbaBridge(Node):
         if n == 0:
             return
         xyzi = np.empty((n, 4), dtype=np.float32)
-        xyzi[:, 0] = arr['x']
-        xyzi[:, 1] = arr['y']
-        xyzi[:, 2] = arr['z']
-        xyzi[:, 3] = arr['intensity']
-        write_pcd_xyzi(os.path.join(self.pcd_dir, '%d.pcd' % self.idx), xyzi)
-
+        xyzi[:, 0] = arr['x']; xyzi[:, 1] = arr['y']; xyzi[:, 2] = arr['z']; xyzi[:, 3] = arr['intensity']
         p = odom.pose.pose.position
         q = odom.pose.pose.orientation
-        # HBA format: tx ty tz qw qx qy qz. Newline is a SEPARATOR, not a terminator
-        # (no trailing newline) so HBA's while(!eof) read_pose doesn't dup the last line.
-        prefix = '' if self.idx == 0 else '\n'
-        self.pose_f.write('%s%.9f %.9f %.9f %.9f %.9f %.9f %.9f'
-                          % (prefix, p.x, p.y, p.z, q.w, q.x, q.y, q.z))
-        self.pose_f.flush()
+        with self._lock:
+            self._frames.append((xyzi, (p.x, p.y, p.z, q.w, q.x, q.y, q.z)))
+            k = len(self._frames)
+        if k % 50 == 0:
+            self.get_logger().info('buffered %d frames' % k)
 
-        if self.idx % 20 == 0:
-            self.get_logger().info('frame %d: %d pts' % (self.idx, n))
-        self.idx += 1
-
-    def destroy_node(self):
-        try:
-            self.pose_f.close()
-        except Exception:  # noqa: BLE001
-            pass
-        self.get_logger().info('hba_bridge done: %d frames written' % self.idx)
-        super().destroy_node()
+    def export(self):
+        with self._lock:
+            frames = list(self._frames)
+        if not frames:
+            self.get_logger().warn('nothing buffered — nothing exported')
+            return
+        pcd_dir = os.path.join(self.out_dir, 'pcd')
+        os.makedirs(pcd_dir, exist_ok=True)
+        lines = []
+        for i, (xyzi, pose) in enumerate(frames):
+            write_pcd_xyzi(os.path.join(pcd_dir, '%d.pcd' % i), xyzi)
+            lines.append('%.9f %.9f %.9f %.9f %.9f %.9f %.9f' % pose)  # HBA: tx ty tz qw qx qy qz
+        pose_path = os.path.join(self.out_dir, 'pose.json')
+        with open(pose_path, 'w') as f:
+            f.write('\n'.join(lines))   # newline as separator, no trailing newline
+        shutil.copyfile(pose_path, os.path.join(self.out_dir, 'pose_initial.json'))
+        self.get_logger().info(
+            'EXPORTED %d frames -> %s  (pcd/ + pose.json + pose_initial.json backup)'
+            % (len(frames), self.out_dir))
 
 
 def main():
     rclpy.init()
     node = HbaBridge()
+    executor = rclpy.executors.SingleThreadedExecutor()
+    executor.add_node(node)
+    spin_thread = threading.Thread(target=executor.spin, daemon=True)
+    spin_thread.start()
     try:
-        rclpy.spin(node)
-    except (KeyboardInterrupt, ExternalShutdownException):
+        input('\n[hba_bridge] play the bag; when it finishes press ENTER to export...\n')
+    except (EOFError, KeyboardInterrupt):
         pass
-    finally:
-        node.destroy_node()
-        try:
-            rclpy.shutdown()
-        except Exception:  # noqa: BLE001
-            pass
+    node.export()
+    node.destroy_node()
+    rclpy.shutdown()
 
 
 if __name__ == '__main__':
